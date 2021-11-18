@@ -6,19 +6,27 @@ import datetime
 from dataclasses import dataclass
 from typing import List
 
-
 @dataclass
-class ListingJson:
-    listings: int  # number of sellers/individual listings at given price
+class SimpleListingsJson:
     unit_price: int  # price at which the items are listed
     quantity: int  # number of individual items listed at unit_price
 
+@dataclass
+class ListingJson(SimpleListingsJson):
+    listings: int  # number of sellers/individual listings at given price
 
 @dataclass
 class ItemListingsJson:
     id: int
     buys: List[ListingJson]
     sells: List[ListingJson]
+
+@dataclass
+class ItemPricesJson:
+    id: int
+    whitelisted: bool # TODO: or str, not sure
+    buys: List[SimpleListingsJson]
+    sells: List[SimpleListingsJson]
 
 
 class BuyOrder:
@@ -81,8 +89,7 @@ class Item:
         self.history: ItemHistory = None  # history of the item on the TP (global)
         self.transaction_list: List[Transaction] = None  # history of local transactions (if self.active,
         # transaction_list[-1] will contain active transaction)
-        self.current_buy: int = 0  # current instant buy price of the item
-        self.current_sell: int = 0  # current instant sell price of the item
+        self.last_update: ItemPricesJson = None  # current instant sell price and quantity of the item
         self.current_profit_percent: float = 0  # profit from flipping the item (after tax)
         self.active: bool = False  # True if there is an active transaction for this item
         self.stonkscore: float = 0
@@ -91,15 +98,10 @@ class Item:
         assert isinstance(other, Item), f"tried to compare an Item with {type(other)}"
         return self.stonkscore < other.stonkscore
 
-    # call this when fresh listings data is available
-    def update(self, listings_json: ItemListingsJson):
-        # update the item history
-        self.history.update(listings_json)
-        # update the current buy and sell prices
-        self.current_buy = listings_json.buys[0].unit_price
-        self.current_sell = listings_json.sells[0].unit_price
-        self.current_profit_percent = (0.85 * self.current_sell - self.current_buy) / self.current_buy
-        self._update_stonkscore()
+    # call this when fresh listings data is available, returns true if any apparent changes are detected
+    def check_update(self, prices_json: ItemPricesJson):
+        # compare updated values with old, return True if there is a difference
+        return prices_json != self.last_update
 
     # calculates updated investment stonks score
     def _update_stonkscore(self):
@@ -112,6 +114,7 @@ class ApiHandler():
     def __init__(self):
         pass
 
+    def update_all(self):
 
 class TradingPost():
     def __init__(self):
