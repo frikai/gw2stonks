@@ -1,4 +1,6 @@
+import datetime
 import os
+import time
 from concurrent.futures._base import Future  # TODO: accessing protected member...? idk it works
 from concurrent.futures.thread import ThreadPoolExecutor
 from math import ceil
@@ -22,6 +24,18 @@ class ItemPricesJson(TypedDict):
     sells: BuysSellsItemPricesJson
 
 
+# typed dict for buys/sells in a listings request json
+class BuysSellsItemListingsJson(BuysSellsItemPricesJson):
+    listings: int
+
+
+# typed dict for a listings request json
+class ItemListingsJson(TypedDict):
+    id: int
+    buys: list[BuysSellsItemListingsJson]  # descending by unit_price
+    sells: list[BuysSellsItemListingsJson]  # ascending by unit_price
+
+
 # handler for interacting with the gw2 api
 class ApiHandler:
     # some base constants
@@ -31,8 +45,7 @@ class ApiHandler:
     DEFAULT_ARGS: dict[str, str] = {"lang": "en"}
 
     def __init__(self):
-        self.executor: ThreadPoolExecutor = ThreadPoolExecutor()  # we use this executer to execute bulk requests in
-        # parallel
+        pass
 
     # a basic thread to execute a single request to the api
     def _request_thread(self, path: str, args: dict[str, str]) -> requests.models.Response:
@@ -47,36 +60,58 @@ class ApiHandler:
     # the responses in the returned list are in the same order as the respective arguments provided by the iterator
     def _bulk_request(self, path: str, args_iterator: Iterator[dict]) -> list[requests.models.Response]:
         response_list: list[Response] = []
-        with self.executor as executor:
+        with ThreadPoolExecutor() as executor:
             # spawn threads for individual requests
             future_list: list[Future] = [executor.submit(self._request_thread, path, args) for args in args_iterator]
             # join on each thread in order and append the responses to the return list
             for future in future_list:
-                response_list.append(future.result())  # waits for the respective thread to finish
+                response_list.append(future.result())
+                # waits for the respective thread to finish
         return response_list
 
-    # function to request "commerce/prices" for a list of provided id's
-    # TODO: behaviour is undefined if list contains invalid IDs or if requests fail due to rate limiting or other causes
-    def get_item_prices_by_id_list(self, id_list: list[int] = []) -> list[ItemPricesJson]:
-        path: str = self.BASE_URL + "commerce/prices"
-        # split bulk request into requests with <=200 ids (maximum size allowed by api)
-        # create an iterator of respective args for each of the bundles of <= 200 ids
-        # to be passed to _bulk_request()
+    # function to return a list of bulk responses with <=200 ids each given an api path and a list of id_s
+    # TODO:
+    #  behaviour is currently undefined if list contains invalid IDs or if requests fail due to rate limiting or
+    #  other causes
+    def _bulk_request_by_id_list(self, path: str, id_list: list[int]) -> list[Response]:
         args_iterator: Iterator[dict] = (
             {"ids": str(id_list[i * self.MAX_PAGE_SIZE:min((i + 1) * self.MAX_PAGE_SIZE, len(id_list))])[1:-1]}
             for i in range(ceil(len(id_list) / self.MAX_PAGE_SIZE)))
-        # execute requests in threaded fashion
-        response_list: list[Response] = self._bulk_request(path, args_iterator)
+        return self._bulk_request(path, args_iterator)
 
-        return [item for r in response_list for item in r.json()]
+    # function to request "commerce/listings" for a list of provided id's. the returned price list follows the ordering
+    # of the provided ids. if no list or an empty list is provided, an empty list is returned
+    def get_item_listings_by_id_list(self, id_list: list[int] = []) -> list[ItemListingsJson]:
+        path: str = self.BASE_URL + "commerce/listings"
+        # get list of bulk responses, split into jsons of individual items
+        return [item_listings for response in self._bulk_request_by_id_list(path, id_list) for
+                item_listings in response.json()]
+
+    # function to request "commerce/prices" for a list of provided id's. the returned price list follows the ordering
+    # of the provided ids. if no list or an empty list is provided, an empty list is returned
+    def get_item_prices_by_id_list(self, id_list: list[int] = []) -> list[ItemPricesJson]:
+        path: str = self.BASE_URL + "commerce/prices"
+        # get list of bulk responses, split into jsons of individual items
+        return [item_prices for response in self._bulk_request_by_id_list(path, id_list) for
+                item_prices in response.json()]
 
 
 # for testing purposes
 def main():
-    apihandler = ApiHandler()
+    api_handler = ApiHandler()
     r = requests.get("https://api.guildwars2.com/v2/commerce/prices")
-    prices_list = apihandler.get_item_prices_by_id_list(id_list=r.json())
-    print(prices_list[0]["whitelisted"])
+    old_list = api_handler.get_item_listings_by_id_list(id_list=[19700])
+    oldtime = datetime.datetime.now()
+    while True:
+        prices_list = api_handler.get_item_listings_by_id_list(id_list=[19700])
+        if old_list != prices_list:
+            print(old_list)
+            print(prices_list)
+            print(datetime.datetime.now() - oldtime)
+            oldtime = datetime.datetime.now()
+            old_list = prices_list
+            print(datetime.datetime.now())
+        time.sleep(1)
 
 
 if __name__ == '__main__':
