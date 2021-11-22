@@ -96,10 +96,11 @@ class ApiHandler:
     # for the most part be false positives (namely relists instead of actual buys or sells)
     @staticmethod
     def _cut_listing(listing: ItemListingsJson) -> ItemListingsJson:
+        listing_cutoff: int = 10
         return {
             "id": listing['id'],
-            "buys": listing['buys'][:10],
-            "sells": listing['sells'][:10]
+            "buys": listing['buys'][:listing_cutoff],
+            "sells": listing['sells'][:listing_cutoff]
         }
 
     # function to request "commerce/listings" for a list of provided id's. the returned price list follows the ordering
