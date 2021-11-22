@@ -10,6 +10,12 @@ import requests
 from requests import Response
 
 
+# typed dict for an item in a items request json
+class ItemJson(TypedDict):
+    id: int
+    name: str
+
+
 # typed dict for buys/sells in a prices request json
 class BuysSellsItemPricesJson(TypedDict):
     quantity: int
@@ -65,7 +71,14 @@ class ApiHandler:
             future_list: list[Future] = [executor.submit(self._request_thread, path, args) for args in args_iterator]
             # join on each thread in order and append the responses to the return list
             for future in future_list:
-                response_list.append(future.result())
+                response: Response = future.result()
+                if response.status_code != 200:
+                    print(f"got code {response.status_code} for request with\n "
+                          f"path:\n"
+                          f"{path}\n"
+                          f"headers:\n"
+                          f"{response.headers}")
+                response_list.append(response)
                 # waits for the respective thread to finish
         return response_list
 
@@ -79,12 +92,22 @@ class ApiHandler:
             for i in range(ceil(len(id_list) / self.MAX_PAGE_SIZE)))
         return self._bulk_request(path, args_iterator)
 
+    # create a new ItemListingsJson using only the first 10 buy and sell listings to eliminate computations that would
+    # for the most part be false positives (namely relists instead of actual buys or sells)
+    @staticmethod
+    def _cut_listing(listing: ItemListingsJson) -> ItemListingsJson:
+        return {
+            "id": listing['id'],
+            "buys": listing['buys'][:10],
+            "sells": listing['sells'][:10]
+        }
+
     # function to request "commerce/listings" for a list of provided id's. the returned price list follows the ordering
     # of the provided ids. if no list or an empty list is provided, an empty list is returned
     def get_item_listings_by_id_list(self, id_list: list[int] = []) -> list[ItemListingsJson]:
         path: str = self.BASE_URL + "commerce/listings"
         # get list of bulk responses, split into jsons of individual items
-        return [item_listings for response in self._bulk_request_by_id_list(path, id_list) for
+        return [self._cut_listing(item_listings) for response in self._bulk_request_by_id_list(path, id_list) for
                 item_listings in response.json()]
 
     # function to request "commerce/prices" for a list of provided id's. the returned price list follows the ordering
