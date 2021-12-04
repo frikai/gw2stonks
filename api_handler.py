@@ -218,11 +218,3 @@ class ApiHandler(object):
         return [(item if item is None else self._cut_item(item)) for response in
                 self._bulk_request_by_id_list(path, id_list) for
                 item in (response if (type(response) == list and response.contains(None)) else response.json())]
-
-
-def main():
-    pass
-
-
-if __name__ == '__main__':
-    main()
